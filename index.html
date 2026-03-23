@@ -1778,60 +1778,35 @@ function removeTypingIndicator(id) {
 }
 
 // ===== API CALL =====
+const BACKEND = 'https://ayoub-code-production.up.railway.app';
+
 async function callAPI(messages) {
   const sel = document.getElementById('modelSelect').value;
   const [provider, model] = sel.split('|');
-
   const sysPrompt = settings.systemPrompt || document.getElementById('systemPrompt').value;
   const temp = settings.temperature ?? 0.7;
   const maxTok = settings.maxTokens ?? 4096;
+  const msgs = messages.map(m => ({ role: m.role, content: m.content }));
 
-  const msgs = [{ role: 'system', content: sysPrompt }, ...messages.map(m => ({ role: m.role, content: m.content }))];
-
-  if (provider === 'nvidia') return callNvidia(model, msgs, temp, maxTok);
-  if (provider === 'groq') return callGroq(model, msgs, temp, maxTok);
-  if (provider === 'cf') return callCloudflare(model, msgs, temp, maxTok);
-  throw new Error('مزود غير معروف');
-}
-
-async function callNvidia(model, msgs, temp, maxTok) {
-  const key = settings.nvidiaKey;
-  if (!key) throw new Error('أدخل مفتاح NVIDIA في الإعدادات');
-  const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: msgs, temperature: temp, max_tokens: maxTok })
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error?.message || 'خطأ NVIDIA');
-  return data.choices[0].message.content;
-}
-
-async function callGroq(model, msgs, temp, maxTok) {
-  const key = settings.groqKey;
-  if (!key) throw new Error('أدخل مفتاح Groq في الإعدادات');
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: msgs, temperature: temp, max_tokens: maxTok })
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error?.message || 'خطأ Groq');
-  return data.choices[0].message.content;
-}
-
-async function callCloudflare(model, msgs, temp, maxTok) {
-  const accountId = settings.cfAccountId;
-  const token = settings.cfToken;
-  if (!accountId || !token) throw new Error('أدخل Account ID و API Token لـ Cloudflare في الإعدادات');
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: msgs, temperature: temp, max_tokens: maxTok })
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.errors?.[0]?.message || 'خطأ Cloudflare');
-  return data.result?.response || data.choices?.[0]?.message?.content || 'لا يوجد رد';
+  try {
+    const res = await fetch(BACKEND + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: msgs,
+        model,
+        provider,
+        systemPrompt: sysPrompt,
+        temperature: temp,
+        maxTokens: maxTok
+      })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'خطأ في السيرفر');
+    return data.response;
+  } catch(e) {
+    throw new Error(e.message || 'Failed to fetch');
+  }
 }
 
 // ===== MODEL CHECKER =====
@@ -1978,35 +1953,30 @@ function sendSuggestion(text) {
 }
 
 // ===== TTS =====
-let _audio = null, _ttsBtn = null;
-async function speakMessage(idx, btn) {
-  const chat = getCurrentChat();
-  if (!chat || !chat.messages[idx]) return;
-  if (_audio) { _audio.pause(); _audio = null; if(_ttsBtn){_ttsBtn.textContent='🔊 استماع';_ttsBtn.style.color='';} if(_ttsBtn===btn){_ttsBtn=null;return;} }
-  if (window.speechSynthesis) window.speechSynthesis.cancel();
-  let text = chat.messages[idx].content.replace(/```[\s\S]*?```/g,'كود.').replace(/[#*`_~>]/g,'').trim().substring(0,600);
-  if (!text) return;
-  _ttsBtn = btn; btn.textContent = '⏳'; btn.style.color = 'var(--yellow)';
-  try {
-    const r = await fetch('https://ayb-bh1146-piper-pro.hf.space/run/predict', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({data:[text]}) });
-    if (!r.ok) throw new Error();
-    const j = await r.json();
-    const d = j.data?.[0];
-    const url = typeof d==='string'&&d.startsWith('http') ? d : d?.url || (d?.name ? 'https://ayb-bh1146-piper-pro.hf.space/file='+d.name : null);
-    if (!url) throw new Error();
-    _audio = new Audio(url);
-    btn.textContent='⏸ إيقاف'; btn.style.color='var(--accent2)';
-    _audio.onended = () => { btn.textContent='🔊 استماع'; btn.style.color=''; _audio=null; _ttsBtn=null; };
-    _audio.onerror = () => _browserTTS(text, btn);
-    _audio.play();
-  } catch(e) { _browserTTS(text, btn); }
+let _aud=null,_tBtn=null;
+async function speakMessage(idx,btn){
+  const chat=getCurrentChat(); if(!chat||!chat.messages[idx])return;
+  if(_aud){_aud.pause();_aud=null;if(_tBtn){_tBtn.textContent='🔊 استماع';_tBtn.style.color='';}if(_tBtn===btn){_tBtn=null;return;}}
+  if(window.speechSynthesis)window.speechSynthesis.cancel();
+  let text=chat.messages[idx].content.replace(/```[^`]*```/g,'كود.').replace(/[#*`_~>]/g,'').trim().substring(0,600);
+  if(!text)return;
+  _tBtn=btn; btn.textContent='⏳'; btn.style.color='var(--yellow)';
+  try{
+    const r=await fetch('https://ayb-bh1146-piper-pro.hf.space/run/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:[text]})});
+    if(!r.ok)throw new Error();
+    const j=await r.json(); const d=j.data?.[0];
+    const url=typeof d==='string'&&d.startsWith('http')?d:d?.url||(d?.name?'https://ayb-bh1146-piper-pro.hf.space/file='+d.name:null);
+    if(!url)throw new Error();
+    _aud=new Audio(url); btn.textContent='⏸ إيقاف'; btn.style.color='var(--accent2)';
+    _aud.onended=()=>{btn.textContent='🔊 استماع';btn.style.color='';_aud=null;_tBtn=null;};
+    _aud.onerror=()=>_bTTS(text,btn); _aud.play();
+  }catch(e){_bTTS(text,btn);}
 }
-function _browserTTS(text, btn) {
-  if (!window.speechSynthesis) { btn.textContent='🔊 استماع'; btn.style.color=''; return; }
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang='ar-SA'; u.rate=0.9;
+function _bTTS(text,btn){
+  if(!window.speechSynthesis){btn.textContent='🔊 استماع';btn.style.color='';return;}
+  const u=new SpeechSynthesisUtterance(text); u.lang='ar-SA'; u.rate=0.9;
   btn.textContent='⏸ إيقاف'; btn.style.color='var(--accent2)';
-  u.onend = () => { btn.textContent='🔊 استماع'; btn.style.color=''; _ttsBtn=null; };
+  u.onend=()=>{btn.textContent='🔊 استماع';btn.style.color='';_tBtn=null;};
   window.speechSynthesis.speak(u);
 }
 
@@ -2044,9 +2014,7 @@ function closeSidebar() {
   const o = document.getElementById('sidebarOverlay');
   if(o) o.classList.remove('on');
 }
-function closeSidebarOnMobile() {
-  if (window.innerWidth <= 768) closeSidebar();
-}
+function closeSidebarOnMobile() { if(window.innerWidth<=768) closeSidebar(); }
 function showToast(msg, type = 'success') {
   const tc = document.getElementById('toastContainer');
   const t = document.createElement('div');
