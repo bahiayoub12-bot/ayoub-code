@@ -7,9 +7,14 @@ const archiver = require('archiver');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 7860;
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.options('*', cors());
 app.use(express.json({ limit: '10mb' }));
 
 // ===== SESSIONS =====
@@ -199,22 +204,31 @@ async function callAPI(provider, model, messages, tools, keys, temp, maxTok) {
   const body = { model, messages, temperature: temp, max_tokens: maxTok };
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto'; }
 
+  // Use process.env first, fallback to keys from request
+  const nvidiaKey = process.env.NVIDIA_API_KEY || keys.nvidiaKey;
+  const groqKey = process.env.GROQ_API_KEY || keys.groqKey;
+  const cfAccountId = process.env.CF_ACCOUNT_ID || keys.cfAccountId;
+  const cfToken = process.env.CF_TOKEN || keys.cfToken;
+
   if (provider === 'nvidia') {
+    if (!nvidiaKey) throw new Error('مفتاح NVIDIA غير موجود');
     res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${keys.nvidiaKey}`, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Bearer ${nvidiaKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
   } else if (provider === 'groq') {
+    if (!groqKey) throw new Error('مفتاح Groq غير موجود');
     res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${keys.groqKey}`, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
   } else if (provider === 'cf') {
-    res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${keys.cfAccountId}/ai/v1/chat/completions`, {
+    if (!cfAccountId || !cfToken) throw new Error('بيانات Cloudflare غير موجودة');
+    res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${keys.cfToken}`, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
   } else {
