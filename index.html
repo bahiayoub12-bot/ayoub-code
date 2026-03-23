@@ -960,10 +960,10 @@ body {
             <option value="groq|qwen-qwq-32b">qwen-qwq-32b</option>
           </optgroup>
           <optgroup label="🟠 Cloudflare">
-            <option value="cf|@cf/qwen/qwen2.5-coder-32b-instruct">qwen2.5-coder-32b (كود) ⭐</option>
-            <option value="cf|@cf/meta/llama-3.3-70b-instruct-fp8-fast">llama-3.3-70b-fast</option>
-            <option value="cf|@cf/qwen/qwq-32b">qwq-32b (تفكير)</option>
-            <option value="cf|@hf/google/gemma-7b-it">gemma-7b-it</option>
+            <option value="cf|cf/qwen/qwen2.5-coder-32b-instruct">qwen2.5-coder-32b (كود) ⭐</option>
+            <option value="cf|cf/meta/llama-3.3-70b-instruct-fp8-fast">llama-3.3-70b-fast</option>
+            <option value="cf|cf/qwen/qwq-32b">qwq-32b (تفكير)</option>
+            <option value="cf|hf/google/gemma-7b-it">gemma-7b-it</option>
           </optgroup>
         </select>
       </div>
@@ -1035,12 +1035,6 @@ body {
   <div class="modal">
     <button class="modal-close" onclick="closeModal('settingsModal')">×</button>
     <div class="modal-title">⚙️ الإعدادات</div>
-
-    <div class="settings-section">
-      <div class="settings-label">🔗 Backend URL <span class="badge">اختياري</span></div>
-      <input type="text" class="settings-input" id="backendUrl" placeholder="https://ayoub-code-production.up.railway.app" value="https://ayoub-code-production.up.railway.app" style="direction:ltr;">
-      <div style="font-size:11px;color:var(--text3);margin-top:4px;">إذا تركته فارغاً سيتصل البوت مباشرة بالنماذج بدون أدوات</div>
-    </div>
 
     <div class="settings-section">
       <div class="settings-label">🟢 NVIDIA <span class="badge">API Key</span></div>
@@ -1359,10 +1353,10 @@ const MODELS = [
   { id: 'groq|llama-3.1-8b-instant', name: 'llama-3.1-8b-instant', provider: 'groq' },
   { id: 'groq|mixtral-8x7b-32768', name: 'mixtral-8x7b', provider: 'groq' },
   { id: 'groq|qwen-qwq-32b', name: 'qwen-qwq-32b', provider: 'groq' },
-  { id: 'cf|@cf/qwen/qwen2.5-coder-32b-instruct', name: 'qwen2.5-coder-32b', provider: 'cf' },
-  { id: 'cf|@cf/meta/llama-3.3-70b-instruct-fp8-fast', name: 'llama-3.3-70b-fast', provider: 'cf' },
-  { id: 'cf|@cf/qwen/qwq-32b', name: 'qwq-32b', provider: 'cf' },
-  { id: 'cf|@hf/google/gemma-7b-it', name: 'gemma-7b-it', provider: 'cf' },
+  { id: 'cf|cf/qwen/qwen2.5-coder-32b-instruct', name: 'qwen2.5-coder-32b', provider: 'cf' },
+  { id: 'cf|cf/meta/llama-3.3-70b-instruct-fp8-fast', name: 'llama-3.3-70b-fast', provider: 'cf' },
+  { id: 'cf|cf/qwen/qwq-32b', name: 'qwq-32b', provider: 'cf' },
+  { id: 'cf|hf/google/gemma-7b-it', name: 'gemma-7b-it', provider: 'cf' },
 ];
 
 // ===== INIT =====
@@ -1373,12 +1367,23 @@ function init() {
   }
   loadSettingsUI();
   renderChatsList();
+  // Load last chat on refresh
   if (chats.length > 0) {
     currentChatId = chats[0].id;
     renderMessages();
   }
   updateProviderDot();
   updateTokenCount();
+  // Close sidebar on outside click (mobile)
+  document.addEventListener('click', function(e) {
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebarToggle');
+    if (window.innerWidth <= 768 && sidebar.classList.contains('open')) {
+      if (!sidebar.contains(e.target) && e.target !== toggle) {
+        sidebar.classList.remove('open');
+      }
+    }
+  });
 }
 
 // ===== THEME =====
@@ -1410,7 +1415,6 @@ function openSettings() {
   document.getElementById('settingsModal').classList.add('open');
 }
 function loadSettingsUI() {
-  if (settings.backendUrl) document.getElementById('backendUrl').value = settings.backendUrl;
   if (settings.nvidiaKey) document.getElementById('nvidiaKey').value = settings.nvidiaKey;
   if (settings.groqKey) document.getElementById('groqKey').value = settings.groqKey;
   if (settings.cfAccountId) document.getElementById('cfAccountId').value = settings.cfAccountId;
@@ -1427,7 +1431,6 @@ function loadSettingsUI() {
 }
 function saveSettings() {
   settings = {
-    backendUrl: document.getElementById('backendUrl').value.trim(),
     nvidiaKey: document.getElementById('nvidiaKey').value.trim(),
     groqKey: document.getElementById('groqKey').value.trim(),
     cfAccountId: document.getElementById('cfAccountId').value.trim(),
@@ -1793,199 +1796,49 @@ async function callAPI(messages) {
   const sysPrompt = settings.systemPrompt || document.getElementById('systemPrompt').value;
   const temp = settings.temperature ?? 0.7;
   const maxTok = settings.maxTokens ?? 4096;
-  const backendUrl = settings.backendUrl;
 
-  const msgs = messages.map(m => ({ role: m.role, content: m.content }));
+  const msgs = [{ role: 'system', content: sysPrompt }, ...messages.map(m => ({ role: m.role, content: m.content }))];
 
-  // Use backend if URL is set
-  if (backendUrl) {
-    return callBackend(backendUrl, provider, model, msgs, sysPrompt, temp, maxTok);
-  }
-
-  // Direct API call (no tools)
-  if (provider === 'nvidia') return callNvidia(model, msgs, sysPrompt, temp, maxTok);
-  if (provider === 'groq') return callGroq(model, msgs, sysPrompt, temp, maxTok);
-  if (provider === 'cf') return callCloudflare(model, msgs, sysPrompt, temp, maxTok);
+  if (provider === 'nvidia') return callNvidia(model, msgs, temp, maxTok);
+  if (provider === 'groq') return callGroq(model, msgs, temp, maxTok);
+  if (provider === 'cf') return callCloudflare(model, msgs, temp, maxTok);
   throw new Error('مزود غير معروف');
 }
 
-async function callBackend(backendUrl, provider, model, msgs, sysPrompt, temp, maxTok) {
-  const chat = getCurrentChat();
-  const sessionId = chat?.sessionId;
-
-  const res = await fetch(`${backendUrl}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages: msgs,
-      model, provider,
-      nvidiaKey: settings.nvidiaKey,
-      groqKey: settings.groqKey,
-      cfAccountId: settings.cfAccountId,
-      cfToken: settings.cfToken,
-      temperature: temp,
-      maxTokens: maxTok,
-      sessionId,
-      systemPrompt: sysPrompt
-    })
-  });
-
-  const data = await res.json();
-  if (!res.ok || !data.success) throw new Error(data.error || 'Backend error');
-
-  // Save session ID
-  if (chat && data.sessionId) {
-    chat.sessionId = data.sessionId;
-    saveChats();
-  }
-
-  // Show files created
-  if (data.filesCreated?.length > 0) {
-    showToast(`📁 أُنشئ ${data.filesCreated.length} ملف`);
-    updateFilePanel(data.allFiles, data.sessionId, backendUrl);
-  }
-
-  // Show tools used
-  if (data.toolsUsed?.length > 0) {
-    const toolNames = data.toolsUsed.map(t => t.tool).join(', ');
-    console.log('Tools used:', toolNames);
-  }
-
-  return data.response;
-}
-
-function updateFilePanel(files, sessionId, backendUrl) {
-  let panel = document.getElementById('filePanel');
-  if (!panel) {
-    panel = document.createElement('div');
-    panel.id = 'filePanel';
-    panel.style.cssText = `
-      position:fixed; left:0; top:0; bottom:0; width:220px;
-      background:var(--bg2); border-right:1px solid var(--border);
-      display:flex; flex-direction:column; z-index:50;
-      transform:translateX(-100%); transition:transform 0.3s;
-    `;
-    panel.innerHTML = `
-      <div style="padding:12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-weight:700;font-size:13px;">📁 الملفات</span>
-        <button onclick="document.getElementById('filePanel').style.transform='translateX(-100%)'"
-          style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:16px;">×</button>
-      </div>
-      <div id="fileList" style="flex:1;overflow-y:auto;padding:8px;font-size:12px;font-family:monospace;"></div>
-      <div style="padding:10px;border-top:1px solid var(--border);">
-        <button onclick="downloadZip('${sessionId}','${backendUrl}')"
-          style="width:100%;background:linear-gradient(135deg,var(--accent),#a855f7);color:white;border:none;padding:8px;border-radius:8px;cursor:pointer;font-family:Cairo,sans-serif;font-weight:700;">
-          📦 تحميل ZIP
-        </button>
-      </div>
-    `;
-    document.body.appendChild(panel);
-  }
-
-  const list = document.getElementById('fileList');
-  if (list) {
-    list.innerHTML = files.map(f => `
-      <div style="padding:4px 8px;border-radius:4px;cursor:pointer;color:var(--text2);"
-        onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''"
-        onclick="viewFile('${sessionId}','${backendUrl}','${f}')">
-        ${getFileIcon(f)} ${f}
-      </div>`).join('');
-  }
-
-  panel.style.transform = 'translateX(0)';
-
-  // Add toggle button if not exists
-  if (!document.getElementById('filePanelToggle')) {
-    const btn = document.createElement('button');
-    btn.id = 'filePanelToggle';
-    btn.innerHTML = '📁';
-    btn.title = 'الملفات';
-    btn.className = 'icon-btn';
-    btn.onclick = () => {
-      const p = document.getElementById('filePanel');
-      p.style.transform = p.style.transform === 'translateX(0)' ? 'translateX(-100%)' : 'translateX(0)';
-    };
-    document.querySelector('.sidebar-footer').prepend(btn);
-  }
-}
-
-function getFileIcon(f) {
-  if (f.endsWith('.html')) return '🌐';
-  if (f.endsWith('.css')) return '🎨';
-  if (f.endsWith('.js') || f.endsWith('.ts') || f.endsWith('.tsx')) return '📜';
-  if (f.endsWith('.json')) return '📦';
-  if (f.endsWith('.md')) return '📝';
-  if (f.endsWith('.py')) return '🐍';
-  return '📄';
-}
-
-async function viewFile(sessionId, backendUrl, file) {
-  try {
-    const res = await fetch(`${backendUrl}/api/files/${sessionId}/content?file=${encodeURIComponent(file)}`);
-    const data = await res.json();
-    showToast(`📄 ${file}`);
-    // Add file content as message
-    const area = document.getElementById('messagesArea');
-    const div = document.createElement('div');
-    div.innerHTML = buildMessageHTML({ role: 'assistant', content: '**' + file + '**
-
-```' + getFileLang(file) + '
-' + data.content + '
-```', ts: Date.now() }, Date.now());
-    area.appendChild(div.firstElementChild);
-    area.querySelectorAll('pre code:not(.hljs)').forEach(b => hljs.highlightElement(b));
-    scrollBottom();
-  } catch(e) { showToast('❌ خطأ في قراءة الملف'); }
-}
-
-function getFileLang(f) {
-  if (f.endsWith('.html')) return 'html';
-  if (f.endsWith('.css')) return 'css';
-  if (f.endsWith('.js')) return 'javascript';
-  if (f.endsWith('.ts') || f.endsWith('.tsx')) return 'typescript';
-  if (f.endsWith('.py')) return 'python';
-  if (f.endsWith('.json')) return 'json';
-  return '';
-}
-
-function downloadZip(sessionId, backendUrl) {
-  window.open(`${backendUrl}/api/download/${sessionId}`, '_blank');
-}
-
-async function callNvidia(model, msgs, sysPrompt, temp, maxTok) {
+async function callNvidia(model, msgs, temp, maxTok) {
   const key = settings.nvidiaKey;
   if (!key) throw new Error('أدخل مفتاح NVIDIA في الإعدادات');
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{role:'system',content:sysPrompt},...msgs], temperature: temp, max_tokens: maxTok })
+    body: JSON.stringify({ model, messages: msgs, temperature: temp, max_tokens: maxTok })
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || 'خطأ NVIDIA');
   return data.choices[0].message.content;
 }
 
-async function callGroq(model, msgs, sysPrompt, temp, maxTok) {
+async function callGroq(model, msgs, temp, maxTok) {
   const key = settings.groqKey;
   if (!key) throw new Error('أدخل مفتاح Groq في الإعدادات');
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{role:'system',content:sysPrompt},...msgs], temperature: temp, max_tokens: maxTok })
+    body: JSON.stringify({ model, messages: msgs, temperature: temp, max_tokens: maxTok })
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || 'خطأ Groq');
   return data.choices[0].message.content;
 }
 
-async function callCloudflare(model, msgs, sysPrompt, temp, maxTok) {
+async function callCloudflare(model, msgs, temp, maxTok) {
   const accountId = settings.cfAccountId;
   const token = settings.cfToken;
   if (!accountId || !token) throw new Error('أدخل Account ID و API Token لـ Cloudflare في الإعدادات');
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{role:'system',content:sysPrompt},...msgs], temperature: temp, max_tokens: maxTok })
+    body: JSON.stringify({ model, messages: msgs, temperature: temp, max_tokens: maxTok })
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.errors?.[0]?.message || 'خطأ Cloudflare');
@@ -2139,35 +1992,21 @@ function sendSuggestion(text) {
 // ===== TTS =====
 let currentAudio = null;
 let currentTTSBtn = null;
-
 async function speakMessage(idx, btn) {
   const chat = getCurrentChat();
   if (!chat || !chat.messages[idx]) return;
-
-  // Stop current audio
   if (currentAudio) {
-    currentAudio.pause();
-    currentAudio = null;
-    if (currentTTSBtn) {
-      currentTTSBtn.textContent = '🔊 استماع';
-      currentTTSBtn.style.color = '';
-    }
+    currentAudio.pause(); currentAudio = null;
+    if (currentTTSBtn) { currentTTSBtn.textContent = '🔊 استماع'; currentTTSBtn.style.color = ''; }
     if (currentTTSBtn === btn) { currentTTSBtn = null; return; }
   }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
-
-  // Clean text
   let text = chat.messages[idx].content;
   text = text.replace(/```[\s\S]*?```/g, 'كود برمجي.');
-  text = text.replace(/[#*`_~>]/g, '');
-  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
-  text = text.trim().substring(0, 800);
+  text = text.replace(/[#*`_~>]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim().substring(0, 800);
   if (!text) return;
-
   currentTTSBtn = btn;
-  btn.textContent = '⏳...';
-  btn.style.color = 'var(--yellow)';
-
+  btn.textContent = '⏳...'; btn.style.color = 'var(--yellow)';
   try {
     const res = await fetch('https://ayb-bh1146-piper-pro.hf.space/run/predict', {
       method: 'POST',
@@ -2177,40 +2016,26 @@ async function speakMessage(idx, btn) {
     if (!res.ok) throw new Error('فشل');
     const result = await res.json();
     let audioUrl = null;
-    if (result.data?.[0]) {
+    if (result.data && result.data[0]) {
       const d = result.data[0];
       if (typeof d === 'string' && d.startsWith('http')) audioUrl = d;
       else if (d.url) audioUrl = d.url;
       else if (d.name) audioUrl = 'https://ayb-bh1146-piper-pro.hf.space/file=' + d.name;
     }
     if (!audioUrl) throw new Error('لا صوت');
-
     currentAudio = new Audio(audioUrl);
-    btn.textContent = '⏸ إيقاف';
-    btn.style.color = 'var(--accent2)';
-    currentAudio.onended = () => {
-      btn.textContent = '🔊 استماع';
-      btn.style.color = '';
-      currentAudio = null; currentTTSBtn = null;
-    };
-    currentAudio.onerror = () => { useBrowserTTS(text, btn); };
+    btn.textContent = '⏸ إيقاف'; btn.style.color = 'var(--accent2)';
+    currentAudio.onended = () => { btn.textContent = '🔊 استماع'; btn.style.color = ''; currentAudio = null; currentTTSBtn = null; };
+    currentAudio.onerror = () => useBrowserTTS(text, btn);
     currentAudio.play();
-  } catch(e) {
-    useBrowserTTS(text, btn);
-  }
+  } catch(e) { useBrowserTTS(text, btn); }
 }
-
 function useBrowserTTS(text, btn) {
-  if (!window.speechSynthesis) {
-    showToast('❌ المتصفح لا يدعم الصوت');
-    btn.textContent = '🔊 استماع'; btn.style.color = '';
-    return;
-  }
+  if (!window.speechSynthesis) { showToast('❌ المتصفح لا يدعم الصوت'); btn.textContent = '🔊 استماع'; btn.style.color = ''; return; }
   window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'ar-SA'; u.rate = 0.9;
-  btn.textContent = '⏸ إيقاف';
-  btn.style.color = 'var(--accent2)';
+  btn.textContent = '⏸ إيقاف'; btn.style.color = 'var(--accent2)';
   u.onend = () => { btn.textContent = '🔊 استماع'; btn.style.color = ''; currentTTSBtn = null; };
   window.speechSynthesis.speak(u);
 }
@@ -2246,8 +2071,8 @@ function toggleSidebar() {
 }
 function closeSidebar() {
   document.getElementById('sidebar').classList.remove('open');
-  const overlay = document.getElementById('sidebarOverlay');
-  if (overlay) overlay.classList.remove('visible');
+  const ov = document.getElementById('sidebarOverlay');
+  if (ov) ov.classList.remove('visible');
 }
 function closeSidebarOnMobile() {
   if (window.innerWidth <= 768) closeSidebar();
