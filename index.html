@@ -1540,30 +1540,70 @@ function buildMessageHTML(m, idx) {
 function renderMarkdownWithCode(text) {
   const codeBlocks = [];
   let counter = 0;
+  const ts = Date.now();
+  const webLangs = ['html','css','javascript','js'];
 
-  // Step 1: extract all code blocks and replace with unique markers
   const processed = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const id = 'cb_' + counter + '_' + Date.now();
-    codeBlocks.push({ id, lang: lang || 'plaintext', code: code.trim() });
-    const marker = `XBLOCK${counter}X`;
+    const id = 'cb_' + counter + '_' + ts;
+    codeBlocks.push({ id, lang: (lang||'plaintext').toLowerCase(), code: code.trim() });
+    const marker = 'XBLOCK' + counter + 'X';
     counter++;
     return marker;
   });
 
-  // Step 2: escape HTML in the non-code parts then parse markdown
-  let html = marked.parse(processed);
+  // دمج بلوكات الويب في بلوك واحد
+  const webBlocks = codeBlocks.filter(b => webLangs.includes(b.lang));
+  if (webBlocks.length > 1) {
+    let html = '', css = '', js = '';
+    webBlocks.forEach(b => {
+      if (b.lang === 'html') html += b.code;
+      else if (b.lang === 'css') css += b.code;
+      else js += b.code;
+    });
+    // دمج كل شيء في HTML واحد
+    let merged = html;
+    if (!merged.includes('<html')) {
+      merged = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+        (css ? '<style>' + css + '</style>' : '') +
+        '</head><body>' + merged +
+        (js ? '<script>' + js + '<\/script>' : '') +
+        '</body></html>';
+    } else {
+      if (css && !merged.includes('<style>')) merged = merged.replace('</head>', '<style>' + css + '</style></head>');
+      if (js && !merged.includes('<script>')) merged = merged.replace('</body>', '<script>' + js + '<\/script></body>');
+    }
+    const mergedId = 'cbm_' + ts;
+    let htmlOut = marked.parse(processed);
+    let firstWeb = true;
+    codeBlocks.forEach((cb, i) => {
+      const marker = 'XBLOCK' + i + 'X';
+      if (webLangs.includes(cb.lang)) {
+        if (firstWeb) {
+          const blockHtml = buildCodeBlock(mergedId, 'html', merged);
+          htmlOut = htmlOut.replace('<p>' + marker + '</p>', blockHtml);
+          htmlOut = htmlOut.replace(marker, blockHtml);
+          firstWeb = false;
+        } else {
+          htmlOut = htmlOut.replace('<p>' + marker + '</p>', '');
+          htmlOut = htmlOut.replace(marker, '');
+        }
+      } else {
+        const blockHtml = buildCodeBlock(cb.id, cb.lang, cb.code);
+        htmlOut = htmlOut.replace('<p>' + marker + '</p>', blockHtml);
+        htmlOut = htmlOut.replace(marker, blockHtml);
+      }
+    });
+    return htmlOut;
+  }
 
-  // Step 3: replace each marker with the actual code block HTML
+  // بلوك واحد أو لا يوجد ويب
+  let html = marked.parse(processed);
   codeBlocks.forEach((cb, i) => {
     const blockHtml = buildCodeBlock(cb.id, cb.lang, cb.code);
-    const marker = `XBLOCK${i}X`;
-    // Try all possible wrappings marked might produce
-    html = html.replace(`<p>${marker}</p>`, blockHtml);
-    html = html.replace(`<p>${marker}
-</p>`, blockHtml);
+    const marker = 'XBLOCK' + i + 'X';
+    html = html.replace('<p>' + marker + '</p>', blockHtml);
     html = html.replace(marker, blockHtml);
   });
-
   return html;
 }
 
