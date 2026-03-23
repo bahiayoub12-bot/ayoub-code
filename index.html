@@ -886,27 +886,26 @@ body {
 @media (max-width: 768px) {
   .sidebar {
     position: fixed; right: 0; top: 0; bottom: 0;
-    z-index: 200; transform: translateX(100%);
-    box-shadow: -4px 0 20px rgba(0,0,0,0.4);
+    z-index: 200; transform: translateX(105%);
+    box-shadow: -4px 0 24px rgba(0,0,0,0.5);
   }
   .sidebar.open { transform: translateX(0) !important; }
   .welcome-suggestions { grid-template-columns: 1fr; }
 }
-
-/* Sidebar overlay on mobile */
-.sidebar-overlay {
-  display: none;
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.5);
-  z-index: 199;
-  backdrop-filter: blur(2px);
+@media (min-width: 769px) {
+  #sidebarToggle { display: none; }
 }
-.sidebar-overlay.show { display: block; }
+.sidebar-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6); z-index: 199;
+  backdrop-filter: blur(3px);
+}
+.sidebar-overlay.visible { display: block; }
 </style>
 </head>
 <body>
 
-<div id="sidebarOverlay" class="sidebar-overlay" onclick="closeSidebarOnMobile()"></div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 <div class="app">
 
   <!-- SIDEBAR -->
@@ -1039,7 +1038,7 @@ body {
 
     <div class="settings-section">
       <div class="settings-label">🔗 Backend URL <span class="badge">اختياري</span></div>
-      <input type="text" class="settings-input" id="backendUrl" placeholder="https://ayoub-code-production.up.railway.app" style="direction:ltr;">
+      <input type="text" class="settings-input" id="backendUrl" placeholder="https://ayoub-code-production.up.railway.app" value="https://ayoub-code-production.up.railway.app" style="direction:ltr;">
       <div style="font-size:11px;color:var(--text3);margin-top:4px;">إذا تركته فارغاً سيتصل البوت مباشرة بالنماذج بدون أدوات</div>
     </div>
 
@@ -1374,23 +1373,12 @@ function init() {
   }
   loadSettingsUI();
   renderChatsList();
-  // Load last chat on refresh
   if (chats.length > 0) {
     currentChatId = chats[0].id;
     renderMessages();
   }
   updateProviderDot();
   updateTokenCount();
-  // Close sidebar on outside click (mobile)
-  document.addEventListener('click', function(e) {
-    const sidebar = document.getElementById('sidebar');
-    const toggle = document.getElementById('sidebarToggle');
-    if (window.innerWidth <= 768 && sidebar.classList.contains('open')) {
-      if (!sidebar.contains(e.target) && e.target !== toggle) {
-        sidebar.classList.remove('open');
-      }
-    }
-  });
 }
 
 // ===== THEME =====
@@ -1551,7 +1539,7 @@ function buildMessageHTML(m, idx) {
       ${!isUser ? `<div class="bubble-actions">
         <button class="action-btn" onclick="copyText(${idx})">📋 نسخ</button>
         <button class="action-btn" onclick="regenerate(${idx})">🔄 إعادة توليد</button>
-        <button class="action-btn tts-btn" id="tts_${idx}" onclick="speakMessage(${idx}, this)">🔊 استماع</button>
+        <button class="action-btn" id="tts_${idx}" onclick="speakMessage(${idx}, this)">🔊 استماع</button>
       </div>` : ''}
     </div>
   </div>`;
@@ -2147,105 +2135,84 @@ function sendSuggestion(text) {
   sendMessage();
 }
 
+
 // ===== TTS =====
 let currentAudio = null;
+let currentTTSBtn = null;
+
 async function speakMessage(idx, btn) {
   const chat = getCurrentChat();
   if (!chat || !chat.messages[idx]) return;
 
-  // Stop if already playing
+  // Stop current audio
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
-    document.querySelectorAll('.tts-btn').forEach(b => {
-      b.textContent = '🔊 استماع';
-      b.style.color = '';
-    });
-    if (btn.dataset.playing === 'true') {
-      btn.dataset.playing = 'false';
-      return;
+    if (currentTTSBtn) {
+      currentTTSBtn.textContent = '🔊 استماع';
+      currentTTSBtn.style.color = '';
     }
+    if (currentTTSBtn === btn) { currentTTSBtn = null; return; }
   }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
 
-  // Get text - strip markdown
+  // Clean text
   let text = chat.messages[idx].content;
-  text = text.replace(/```[\s\S]*?```/g, 'كود برمجي');
-  text = text.replace(/[#*`_~]/g, '');
+  text = text.replace(/```[\s\S]*?```/g, 'كود برمجي.');
+  text = text.replace(/[#*`_~>]/g, '');
   text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
-  text = text.trim().substring(0, 1000);
-
+  text = text.trim().substring(0, 800);
   if (!text) return;
 
-  btn.textContent = '⏳ جاري...';
+  currentTTSBtn = btn;
+  btn.textContent = '⏳...';
   btn.style.color = 'var(--yellow)';
-  btn.dataset.playing = 'true';
 
   try {
-    // Use Hugging Face Piper TTS
-    const response = await fetch('https://ayb-bh1146-piper-pro.hf.space/run/predict', {
+    const res = await fetch('https://ayb-bh1146-piper-pro.hf.space/run/predict', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: [text, 'ar'] })
+      body: JSON.stringify({ data: [text] })
     });
-
-    if (!response.ok) throw new Error('TTS failed');
-    const result = await response.json();
-
-    // Get audio URL from response
+    if (!res.ok) throw new Error('فشل');
+    const result = await res.json();
     let audioUrl = null;
-    if (result.data && result.data[0]) {
-      if (typeof result.data[0] === 'string') audioUrl = result.data[0];
-      else if (result.data[0].url) audioUrl = result.data[0].url;
-      else if (result.data[0].name) audioUrl = 'https://ayb-bh1146-piper-pro.hf.space/file=' + result.data[0].name;
+    if (result.data?.[0]) {
+      const d = result.data[0];
+      if (typeof d === 'string' && d.startsWith('http')) audioUrl = d;
+      else if (d.url) audioUrl = d.url;
+      else if (d.name) audioUrl = 'https://ayb-bh1146-piper-pro.hf.space/file=' + d.name;
     }
-
-    if (!audioUrl) throw new Error('لا يوجد صوت');
+    if (!audioUrl) throw new Error('لا صوت');
 
     currentAudio = new Audio(audioUrl);
     btn.textContent = '⏸ إيقاف';
     btn.style.color = 'var(--accent2)';
-
     currentAudio.onended = () => {
       btn.textContent = '🔊 استماع';
       btn.style.color = '';
-      btn.dataset.playing = 'false';
-      currentAudio = null;
+      currentAudio = null; currentTTSBtn = null;
     };
-    currentAudio.onerror = () => {
-      btn.textContent = '🔊 استماع';
-      btn.style.color = '';
-      btn.dataset.playing = 'false';
-      currentAudio = null;
-      // Fallback to browser TTS
-      browserTTS(text, btn);
-    };
+    currentAudio.onerror = () => { useBrowserTTS(text, btn); };
     currentAudio.play();
-
-  } catch (e) {
-    // Fallback to browser built-in TTS
-    browserTTS(text, btn);
+  } catch(e) {
+    useBrowserTTS(text, btn);
   }
 }
 
-function browserTTS(text, btn) {
+function useBrowserTTS(text, btn) {
   if (!window.speechSynthesis) {
-    showToast('❌ المتصفح لا يدعم TTS');
-    btn.textContent = '🔊 استماع';
-    btn.style.color = '';
+    showToast('❌ المتصفح لا يدعم الصوت');
+    btn.textContent = '🔊 استماع'; btn.style.color = '';
     return;
   }
   window.speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = 'ar-SA';
-  utter.rate = 0.9;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'ar-SA'; u.rate = 0.9;
   btn.textContent = '⏸ إيقاف';
   btn.style.color = 'var(--accent2)';
-  utter.onend = () => {
-    btn.textContent = '🔊 استماع';
-    btn.style.color = '';
-    btn.dataset.playing = 'false';
-  };
-  window.speechSynthesis.speak(utter);
+  u.onend = () => { btn.textContent = '🔊 استماع'; btn.style.color = ''; currentTTSBtn = null; };
+  window.speechSynthesis.speak(u);
 }
 
 // ===== UTILS =====
@@ -2274,16 +2241,16 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   const overlay = document.getElementById('sidebarOverlay');
-  sidebar.classList.toggle('open');
-  if (overlay) overlay.classList.toggle('show', sidebar.classList.contains('open'));
+  const isOpen = sidebar.classList.toggle('open');
+  if (overlay) overlay.classList.toggle('visible', isOpen);
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (overlay) overlay.classList.remove('visible');
 }
 function closeSidebarOnMobile() {
-  const sidebar = document.getElementById('sidebar');
-  const overlay = document.getElementById('sidebarOverlay');
-  if (window.innerWidth <= 768) {
-    sidebar.classList.remove('open');
-    if (overlay) overlay.classList.remove('show');
-  }
+  if (window.innerWidth <= 768) closeSidebar();
 }
 function showToast(msg, type = 'success') {
   const tc = document.getElementById('toastContainer');
