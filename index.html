@@ -891,9 +891,8 @@ body {
 }
 .sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:199; }
 .sidebar-overlay.on { display:block; }
-/* Streaming cursor */
-.streaming-cursor::after { content:'▋'; animation: blink 0.7s infinite; color: var(--accent2); }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.streaming-cursor::after { content:'|'; animation:blink 0.7s infinite; color:var(--accent2); margin-right:2px; }
+@keyframes blink { 0%,100%{opacity:1}50%{opacity:0} }
 </style>
 </head>
 <body>
@@ -1546,19 +1545,17 @@ function renderMarkdownWithCode(text) {
   let counter = 0;
   const ts = Date.now();
   const webLangs = ['html','css','javascript','js'];
-
-  const processed = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+  const processed = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
     const id = 'cb_' + counter + '_' + ts;
     codeBlocks.push({ id, lang: (lang||'plaintext').toLowerCase(), code: code.trim() });
     const marker = 'XBLOCK' + counter + 'X';
     counter++;
     return marker;
   });
-
-  const webBlocks = codeBlocks.filter(b => webLangs.includes(b.lang));
+  const webBlocks = codeBlocks.filter(function(b) { return webLangs.includes(b.lang); });
   if (webBlocks.length > 1) {
     let html = '', css = '', js = '';
-    webBlocks.forEach(b => {
+    webBlocks.forEach(function(b) {
       if (b.lang === 'html') html += b.code;
       else if (b.lang === 'css') css += b.code;
       else js += b.code;
@@ -1574,36 +1571,35 @@ function renderMarkdownWithCode(text) {
       if (js) merged = merged.replace('</body>', '<script>' + js + '<\/script></body>');
     }
     const mergedId = 'cbm_' + ts;
-    let htmlOut = marked.parse(processed);
+    let out = marked.parse(processed);
     let firstWeb = true;
-    codeBlocks.forEach((cb, i) => {
+    codeBlocks.forEach(function(cb, i) {
       const marker = 'XBLOCK' + i + 'X';
       if (webLangs.includes(cb.lang)) {
         if (firstWeb) {
-          htmlOut = htmlOut.replace('<p>' + marker + '</p>', buildCodeBlock(mergedId, 'html', merged));
-          htmlOut = htmlOut.replace(marker, buildCodeBlock(mergedId, 'html', merged));
+          out = out.replace('<p>' + marker + '</p>', buildCodeBlock(mergedId, 'html', merged));
+          out = out.replace(marker, buildCodeBlock(mergedId, 'html', merged));
           firstWeb = false;
         } else {
-          htmlOut = htmlOut.replace('<p>' + marker + '</p>', '');
-          htmlOut = htmlOut.replace(marker, '');
+          out = out.replace('<p>' + marker + '</p>', '');
+          out = out.replace(marker, '');
         }
       } else {
         const bh = buildCodeBlock(cb.id, cb.lang, cb.code);
-        htmlOut = htmlOut.replace('<p>' + marker + '</p>', bh);
-        htmlOut = htmlOut.replace(marker, bh);
+        out = out.replace('<p>' + marker + '</p>', bh);
+        out = out.replace(marker, bh);
       }
     });
-    return htmlOut;
+    return out;
   }
-
-  let html = marked.parse(processed);
-  codeBlocks.forEach((cb, i) => {
+  let out = marked.parse(processed);
+  codeBlocks.forEach(function(cb, i) {
     const bh = buildCodeBlock(cb.id, cb.lang, cb.code);
     const marker = 'XBLOCK' + i + 'X';
-    html = html.replace('<p>' + marker + '</p>', bh);
-    html = html.replace(marker, bh);
+    out = out.replace('<p>' + marker + '</p>', bh);
+    out = out.replace(marker, bh);
   });
-  return html;
+  return out;
 }
 
 function buildCodeBlock(id, lang, code) {
@@ -1840,29 +1836,26 @@ async function callAPI(messages) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullText = '';
+      let buffer = '';
 
-      // Create streaming message bubble
       const area = document.getElementById('messagesArea');
       const streamId = 'stream_' + Date.now();
-      area.insertAdjacentHTML('beforeend', `
-        <div class="message ai" id="${streamId}">
-          <div class="avatar ai">AC</div>
-          <div class="bubble">
-            <div class="bubble-header"><span class="bubble-name">AYOUB CODE</span></div>
-            <div class="bubble-body streaming-cursor" id="${streamId}_body"></div>
-          </div>
-        </div>`);
+      const div = document.createElement('div');
+      div.className = 'message ai';
+      div.id = streamId;
+      div.innerHTML = '<div class="avatar ai">AC</div><div class="bubble"><div class="bubble-header"><span class="bubble-name">AYOUB CODE</span></div><div class="bubble-body streaming-cursor" id="' + streamId + '_body"></div></div>';
+      area.appendChild(div);
       scrollBottom();
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('
-');
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
+          const data = line.slice(6).trim();
           if (data === '[DONE]') continue;
           try {
             const parsed = JSON.parse(data);
@@ -1880,56 +1873,43 @@ async function callAPI(messages) {
         }
       }
 
-      // Remove streaming cursor and finalize
       const bodyEl = document.getElementById(streamId + '_body');
       if (bodyEl) bodyEl.classList.remove('streaming-cursor');
-
-      // Remove streaming bubble (will be re-added properly by sendMessage)
       const streamEl = document.getElementById(streamId);
       if (streamEl) streamEl.remove();
 
-      // Check for files in response
       checkAndShowZip(fullText);
-
       resolve(fullText);
     } catch(e) { reject(e); }
   });
 }
 
-// ===== ZIP: detect files and offer download =====
 function checkAndShowZip(text) {
-  const filePattern = /FILE:\s*([^
-]+)
-```[\w]*
-([\s\S]*?)```/g;
   const files = [];
-  let match;
-  while ((match = filePattern.exec(text)) !== null) {
-    files.push({ name: match[1].trim(), content: match[2] });
+  const marker = 'FILE:';
+  const parts = text.split(marker);
+  for (let i = 1; i < parts.length; i++) {
+    const nl = parts[i].indexOf('\n');
+    if (nl === -1) continue;
+    const name = parts[i].substring(0, nl).trim();
+    const rest = parts[i].substring(nl);
+    const m = rest.match(/```\w*\n([\s\S]*?)```/);
+    if (name && m) files.push({ name, content: m[1] });
   }
-  if (files.length > 1) {
-    showZipButton(files);
-  }
+  if (files.length > 1) showZipButton(files);
 }
 
 function showZipButton(files) {
-  const existing = document.getElementById('zipFloatBtn');
-  if (existing) existing.remove();
-  const btn = document.createElement('div');
-  btn.id = 'zipFloatBtn';
-  btn.style.cssText = `
-    position:fixed; bottom:100px; left:20px; z-index:999;
-    background:linear-gradient(135deg,var(--accent),#a855f7);
-    color:white; border-radius:12px; padding:12px 18px;
-    cursor:pointer; font-family:Cairo,sans-serif; font-weight:700;
-    font-size:14px; box-shadow:0 4px 20px rgba(124,106,247,0.5);
-    display:flex; align-items:center; gap:8px;
-    animation: slideUp 0.3s ease;
-  `;
-  btn.innerHTML = `📦 تحميل المشروع (${files.length} ملف)`;
+  const ex = document.getElementById('zipBtn');
+  if (ex) ex.remove();
+  const btn = document.createElement('button');
+  btn.id = 'zipBtn';
+  btn.className = 'btn-primary';
+  btn.style.cssText = 'position:fixed;bottom:90px;left:20px;z-index:999;padding:10px 16px;font-size:13px;';
+  btn.innerHTML = '📦 تحميل المشروع (' + files.length + ' ملف)';
   btn.onclick = () => downloadZip(files);
   document.body.appendChild(btn);
-  setTimeout(() => { if(btn.parentNode) btn.remove(); }, 30000);
+  setTimeout(() => { if(btn.parentNode) btn.remove(); }, 60000);
 }
 
 async function downloadZip(files) {
@@ -1938,9 +1918,9 @@ async function downloadZip(files) {
   const blob = await zip.generateAsync({ type: 'blob' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'ayoub-code-project.zip';
+  a.download = 'project.zip';
   a.click();
-  showToast('📦 تم تحميل المشروع!');
+  showToast('📦 تم التحميل!');
 }
 
 // ===== MODEL CHECKER =====
@@ -2087,61 +2067,54 @@ function sendSuggestion(text) {
 }
 
 // ===== TTS =====
-let _aud=null, _tBtn=null;
-async function speakMessage(idx, btn) {
-  const chat = getCurrentChat();
+var _aud = null, _tBtn = null;
+function speakMessage(idx, btn) {
+  var chat = getCurrentChat();
   if (!chat || !chat.messages[idx]) return;
-  // Stop current
-  if (_aud) { _aud.pause(); _aud=null; if(_tBtn){_tBtn.textContent='🔊 استماع';_tBtn.style.color='';} if(_tBtn===btn){_tBtn=null;return;} }
+  if (_aud) {
+    _aud.pause(); _aud = null;
+    if (_tBtn) { _tBtn.textContent = '🔊 استماع'; _tBtn.style.color = ''; }
+    if (_tBtn === btn) { _tBtn = null; return; }
+  }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
-  // Clean text
-  let text = chat.messages[idx].content
-    .replace(/FILE:\s*[^
-]+/g, '')
-    .replace(/```[\s\S]*?```/g, 'كود برمجي.')
+  var raw = chat.messages[idx].content;
+  var text = raw
+    .replace(/FILE:[^\n]*/g, '')
+    .replace(/```[\s\S]*?```/g, 'كود.')
     .replace(/[#*`_~>]/g, '')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .trim().substring(0, 500);
+    .trim()
+    .substring(0, 500);
   if (!text) return;
   _tBtn = btn;
-  btn.textContent = '⏳ جاري...';
-  btn.style.color = 'var(--yellow)';
-  try {
-    // Wake up HF space first
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 15000);
-    const r = await fetch('https://ayb-bh1146-piper-pro.hf.space/run/predict', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: [text] }),
-      signal: ctrl.signal
-    });
-    clearTimeout(timeout);
-    if (!r.ok) throw new Error('HF error');
-    const j = await r.json();
-    const d = j.data?.[0];
-    let url = null;
-    if (typeof d === 'string' && d.startsWith('http')) url = d;
-    else if (d?.url) url = d.url;
-    else if (d?.name) url = 'https://ayb-bh1146-piper-pro.hf.space/file=' + d.name;
-    if (!url) throw new Error('no audio');
+  btn.textContent = '⏳'; btn.style.color = 'var(--yellow)';
+  fetch('https://ayb-bh1146-piper-pro.hf.space/run/predict', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: [text] })
+  }).then(function(r) {
+    if (!r.ok) throw new Error('err');
+    return r.json();
+  }).then(function(j) {
+    var d = j.data && j.data[0];
+    var url = null;
+    if (typeof d === 'string' && d.indexOf('http') === 0) url = d;
+    else if (d && d.url) url = d.url;
+    else if (d && d.name) url = 'https://ayb-bh1146-piper-pro.hf.space/file=' + d.name;
+    if (!url) throw new Error('no url');
     _aud = new Audio(url);
     btn.textContent = '⏸ إيقاف'; btn.style.color = 'var(--accent2)';
-    _aud.onended = () => { btn.textContent='🔊 استماع'; btn.style.color=''; _aud=null; _tBtn=null; };
-    _aud.onerror = () => { _bTTS(text, btn); };
-    await _aud.play();
-  } catch(e) {
-    _bTTS(text, btn);
-  }
+    _aud.onended = function() { btn.textContent = '🔊 استماع'; btn.style.color = ''; _aud = null; _tBtn = null; };
+    _aud.onerror = function() { _bTTS(text, btn); };
+    _aud.play();
+  }).catch(function() { _bTTS(text, btn); });
 }
 function _bTTS(text, btn) {
-  if (!window.speechSynthesis) { btn.textContent='🔊 استماع'; btn.style.color=''; return; }
+  if (!window.speechSynthesis) { btn.textContent = '🔊 استماع'; btn.style.color = ''; return; }
   window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
+  var u = new SpeechSynthesisUtterance(text);
   u.lang = 'ar-SA'; u.rate = 0.9;
   btn.textContent = '⏸ إيقاف'; btn.style.color = 'var(--accent2)';
-  u.onend = () => { btn.textContent='🔊 استماع'; btn.style.color=''; _tBtn=null; };
-  u.onerror = () => { btn.textContent='🔊 استماع'; btn.style.color=''; };
+  u.onend = function() { btn.textContent = '🔊 استماع'; btn.style.color = ''; _tBtn = null; };
   window.speechSynthesis.speak(u);
 }
 
@@ -2171,8 +2144,8 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 function toggleSidebar() {
   const s = document.getElementById('sidebar');
   const o = document.getElementById('sidebarOverlay');
-  const open = s.classList.toggle('open');
-  if(o) o.classList.toggle('on', open);
+  const isOpen = s.classList.toggle('open');
+  if(o) o.classList.toggle('on', isOpen);
 }
 function closeSidebar() {
   document.getElementById('sidebar').classList.remove('open');
